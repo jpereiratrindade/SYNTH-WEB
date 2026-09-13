@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Validate the candidate witness and its provided readiness surface."""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import urllib.request
+
+
+def main() -> int:
+    witness_path = pathlib.Path(os.environ["SYNTH_WITNESS_PATH"])
+    if not witness_path.is_file():
+        return 1
+    witness = json.loads(witness_path.read_text(encoding="utf-8"))
+    if witness.get("realization_id") != os.environ["SYNTH_REALIZATION_ID"]:
+        return 1
+    if witness.get("readiness", {}).get("status") != "READY":
+        return 1
+    endpoint = next(item["locator"] for item in witness["provided_surfaces"] if item["id"] == "synth-web.http")
+    with urllib.request.urlopen(endpoint + "/health", timeout=0.5) as response:
+        return 0 if response.status == 200 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

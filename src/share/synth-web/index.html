@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SYNTH — observed state</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">FACTUAL PROJECTION · LIVE EVIDENCE</p>
+        <h1>SYNTH</h1>
+        <p id="summary">Reading the resolved public evidence surface…</p>
+      </header>
+      <section class="signal" aria-live="polite">
+        <span class="pulse"></span><strong id="evidence-state">OBSERVING</strong>
+        <span id="observed-at"></span>
+      </section>
+      <section class="grid">
+        <article><p>Identity</p><strong id="identity">—</strong></article>
+        <article><p>Version</p><strong id="version">—</strong></article>
+        <article><p>Surfaces</p><strong id="surface-count">—</strong></article>
+        <article><p>Relations</p><strong id="relation-count">—</strong></article>
+      </section>
+      <section>
+        <div class="section-title"><h2>Observed surfaces</h2><span>PUBLIC</span></div>
+        <div id="surfaces" class="stack"></div>
+      </section>
+      <section>
+        <div class="section-title"><h2>Observed relations</h2><span>WITNESSED</span></div>
+        <div id="relations" class="stack"></div>
+      </section>
+      <details>
+        <summary>Inspect raw evidence</summary>
+        <pre id="raw"></pre>
+      </details>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

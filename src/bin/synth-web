@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Independent factual web projection for a resolved SYNTH evidence surface."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import signal
+import tempfile
+import threading
+import urllib.request
+from datetime import datetime, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+IDENTITY = "synth-web"
+VERSION = "0.1.0"
+ASSET_ROOT = pathlib.Path(__file__).resolve().parent.parent / "share" / "synth-web"
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def atomic_json(path: pathlib.Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        os.replace(temporary, path)
+    except BaseException:
+        pathlib.Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def load_resolved_surface() -> tuple[dict, dict, bytes]:
+    resolution_path = pathlib.Path(os.environ["SYNTH_RESOLVED_SURFACES_PATH"])
+    resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+    if resolution.get("epistemic_class") != "RESOLVED":
+        raise RuntimeError("surface resolution is not RESOLVED")
+    surface = next(item for item in resolution["surfaces"] if item["id"] == "synth.evidence")
+    evidence_path = pathlib.Path(surface["locator"])
+    evidence_bytes = evidence_path.read_bytes()
+    evidence = json.loads(evidence_bytes)
+    if evidence.get("identity") != "SYNTH" or evidence.get("epistemic_class") != "OBSERVED":
+        raise RuntimeError("synth.evidence is not a factual SYNTH observation")
+    return surface, evidence, evidence_bytes
+
+
+class FactualHandler(BaseHTTPRequestHandler):
+    evidence: dict = {}
+    healthy = True
+
+    def log_message(self, *_: object) -> None:
+        return
+
+    def send_bytes(self, status: HTTPStatus, media_type: str, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", media_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler protocol
+        if self.path == "/health":
+            status = HTTPStatus.OK if self.healthy else HTTPStatus.SERVICE_UNAVAILABLE
+            self.send_bytes(status, "application/json", json.dumps({"ready": self.healthy}).encode())
+            return
+        if self.path in {"/api/state", "/api/raw"}:
+            self.send_bytes(HTTPStatus.OK, "application/json", json.dumps(self.evidence).encode())
+            return
+        assets = {"/": "index.html", "/styles.css": "styles.css", "/app.js": "app.js"}
+        if self.path in assets:
+            media = {"index.html": "text/html; charset=utf-8", "styles.css": "text/css", "app.js": "text/javascript"}
+            name = assets[self.path]
+            self.send_bytes(HTTPStatus.OK, media[name], (ASSET_ROOT / name).read_bytes())
+            return
+        self.send_bytes(HTTPStatus.NOT_FOUND, "text/plain", b"Not found\n")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fail-readiness", action="store_true")
+    options = parser.parse_args()
+
+    surface, evidence, evidence_bytes = load_resolved_surface()
+    FactualHandler.evidence = evidence
+    FactualHandler.healthy = not options.fail_readiness
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FactualHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}"
+
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+    signal.signal(signal.SIGINT, lambda *_: stopping.set())
+
+    if not options.fail_readiness:
+        with urllib.request.urlopen(endpoint + "/health", timeout=1) as response:
+            if response.status != HTTPStatus.OK:
+                raise RuntimeError("self-observed readiness failed")
+        observed = now()
+        witness = {
+            "$schema": "urn:synth:schema:realization-witness:0.1.0",
+            "schema_version": "0.1.0",
+            "identity": IDENTITY,
+            "version": VERSION,
+            "realization_id": os.environ["SYNTH_REALIZATION_ID"],
+            "process": {"pid": os.getpid()},
+            "provided_surfaces": [{
+                "id": "synth-web.http",
+                "owner": IDENTITY,
+                "kind": "http",
+                "locator": endpoint,
+                "direction": "inbound",
+                "media_type": "text/html",
+                "observability": "runtime-witness",
+                "metadata": "factual human projection of resolved SYNTH evidence",
+            }],
+            "consumed_surfaces": [{
+                "id": surface["id"],
+                "locator": surface["locator"],
+                "observed_at": observed,
+                "evidence_sha256": hashlib.sha256(evidence_bytes).hexdigest(),
+            }],
+            "readiness": {"status": "READY", "mechanism": "self-observed HTTP health", "checked_at": observed},
+            "observed_at": observed,
+        }
+        atomic_json(pathlib.Path(os.environ["SYNTH_WITNESS_PATH"]), witness)
+
+    stopping.wait()
+    server.shutdown()
+    thread.join(timeout=2)
+    server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
