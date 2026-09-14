@@ -6,6 +6,7 @@
 // Application State
 const appState = {
   state: null,
+  ecosystem: null,
   meta: null,
   selectedEntity: null,
   isLiveSSE: false,
@@ -40,6 +41,9 @@ const dom = {
   svgNodes: document.getElementById("svg-nodes"),
   srSurfaces: document.getElementById("sr-surfaces-list"),
   srRelations: document.getElementById("sr-relations-list"),
+  ecosystemCount: document.getElementById("ecosystem-count"),
+  ecosystemGeneration: document.getElementById("ecosystem-generation"),
+  ecosystemProviders: document.getElementById("ecosystem-providers"),
   themeToggle: document.getElementById("theme-toggle"),
   themeIcon: document.getElementById("theme-icon"),
   btnOpenRaw: document.getElementById("btn-open-raw"),
@@ -134,8 +138,7 @@ function handleStateUpdate(state) {
   dom.metricRelations.textContent = String(relations.length);
   dom.epistemicBadge.textContent = state.epistemic_class || "OBSERVED";
 
-  const modeLabel = appState.isLiveSSE ? "Live projection" : "Observed snapshot";
-  dom.projectionLabel.textContent = modeLabel;
+  updateProjectionLabel();
 
   if (state.timestamp) {
     dom.provenanceTime.textContent = `Snapshot observed at ${state.timestamp}`;
@@ -153,6 +156,57 @@ function handleStateUpdate(state) {
   }
 
   updateFreshnessTicker();
+}
+
+function updateProjectionLabel() {
+  const live = Boolean(appState.meta?.is_live);
+  dom.projectionLabel.textContent = live ? "Live ecosystem · pinned evidence" : "Pinned evidence";
+}
+
+function handleEcosystemUpdate(ecosystem) {
+  if (!ecosystem || typeof ecosystem !== "object" || !Array.isArray(ecosystem.surfaces)) return;
+  appState.ecosystem = ecosystem;
+  const entry = ecosystem.surfaces.find((surface) => surface.id === "interface.human.web.v1");
+  const providers = Array.isArray(entry?.providers)
+    ? entry.providers.map((provider) => {
+        try {
+          const locator = new URL(provider.locator);
+          return ["http:", "https:"].includes(locator.protocol) ? { ...provider, locator: locator.href } : null;
+        } catch {
+          return null;
+        }
+      }).filter((provider) =>
+        provider &&
+        provider.state === "ACTIVE" &&
+        provider.epistemic_class === "OBSERVED")
+    : [];
+
+  dom.ecosystemCount.textContent = String(providers.length);
+  dom.ecosystemGeneration.textContent = typeof ecosystem.generation === "string"
+    ? ecosystem.generation.slice(0, 8)
+    : "unknown";
+  dom.ecosystemProviders.replaceChildren();
+  if (!providers.length) {
+    const empty = document.createElement("li");
+    empty.className = "ecosystem-empty";
+    empty.textContent = "No active human interfaces observed.";
+    dom.ecosystemProviders.appendChild(empty);
+    return;
+  }
+  providers.forEach((provider) => {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = provider.locator;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const identity = document.createElement("strong");
+    identity.textContent = provider.identity;
+    const locator = document.createElement("code");
+    locator.textContent = provider.locator;
+    link.append(identity, locator);
+    item.appendChild(link);
+    dom.ecosystemProviders.appendChild(item);
+  });
 }
 
 function updateAccessibleAlternative(surfaces, relations) {
@@ -645,9 +699,20 @@ async function fetchMeta() {
       if (appState.meta.source_surface) {
         dom.sourceName.textContent = appState.meta.source_surface;
       }
+      updateProjectionLabel();
     }
   } catch {
     // Meta endpoint is non-blocking
+  }
+}
+
+async function fetchEcosystem() {
+  try {
+    const res = await fetch("/api/ecosystem", { cache: "no-store" });
+    if (!res.ok) return;
+    handleEcosystemUpdate(await res.json());
+  } catch {
+    // The immutable evidence view remains available without the live projection.
   }
 }
 
@@ -669,6 +734,7 @@ function setupSSE() {
   // Perform immediate initial fetch to avoid waiting for connection handshake
   fetchMeta();
   fetchStatePolling();
+  fetchEcosystem();
 
   if (!window.EventSource) {
     startPolling();
@@ -697,10 +763,18 @@ function setupSSE() {
       fetchMeta();
     });
 
+    for (const eventName of ["ecosystem_ready", "ecosystem_updated"]) {
+      sse.addEventListener(eventName, (e) => {
+        try {
+          handleEcosystemUpdate(JSON.parse(e.data));
+        } catch {}
+        fetchMeta();
+      });
+    }
+
     sse.onerror = () => {
       appState.isLiveSSE = false;
-      const modeLabel = "Observed snapshot";
-      dom.projectionLabel.textContent = modeLabel;
+      updateProjectionLabel();
       // Fallback polling
       fetchStatePolling();
     };
@@ -713,8 +787,12 @@ function startPolling() {
   appState.isLiveSSE = false;
   fetchMeta();
   fetchStatePolling();
+  fetchEcosystem();
   if (appState.pollTimer) clearInterval(appState.pollTimer);
-  appState.pollTimer = setInterval(fetchStatePolling, 2500);
+  appState.pollTimer = setInterval(() => {
+    fetchStatePolling();
+    fetchEcosystem();
+  }, 2500);
 }
 
 // --- Initialization ---

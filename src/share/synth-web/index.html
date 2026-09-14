@@ -42,6 +42,20 @@
         </div>
 
         <div class="header-actions">
+          <details class="ecosystem-menu" id="ecosystem-menu">
+            <summary class="btn btn-secondary" aria-controls="ecosystem-providers">
+              Ecosystem <span class="ecosystem-count" id="ecosystem-count">0</span>
+            </summary>
+            <div class="ecosystem-popover">
+              <div class="ecosystem-heading">
+                <strong>Human interfaces</strong>
+                <span id="ecosystem-generation">snapshot</span>
+              </div>
+              <ul id="ecosystem-providers" aria-live="polite">
+                <li class="ecosystem-empty">No active human interfaces observed.</li>
+              </ul>
+            </div>
+          </details>
           <button id="theme-toggle" class="btn btn-ghost btn-icon" aria-label="Toggle theme: system, dark, or light" title="Theme selector">
             <span id="theme-icon" aria-hidden="true">◐</span>
           </button>

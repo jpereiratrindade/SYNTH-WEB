@@ -2,9 +2,10 @@
 
 Independent factual web projection used by `SYNTH-REALIZATION-001`.
 
-It consumes only a resolved public `synth.evidence` surface, serves a local
-human interface, and emits a versioned runtime witness. It does not include
-SYNTH headers, inspect SYNTH private state, or require the SYNTH source tree.
+It preserves a resolved public `synth.evidence` surface as immutable audit
+context and optionally consumes the public `synth.ecosystem.stream.v1`
+capability for present-state discovery. It does not include SYNTH headers,
+inspect SYNTH private state, or require the SYNTH source tree.
 
 $$\boxed{\text{SYNTH fornece realidade} \quad;\quad \text{SYNTH-WEB fornece experiência}}$$
 
@@ -26,8 +27,13 @@ See [docs/SYNTH-WEB-EXPERIENCE-001-v0.1.0.md](docs/SYNTH-WEB-EXPERIENCE-001-v0.1
 - `GET /health`: Self-observed HTTP readiness endpoint.
 - `GET /api/state`: Current observed evidence state JSON.
 - `GET /api/raw`: Raw canonical evidence JSON.
+- `GET /api/ecosystem`: Latest factual ecosystem projection received from SYNTH.
 - `GET /api/meta`: Web realization metadata, loaded timestamps, and SHA-256 digest.
-- `GET /api/events`: Server-Sent Events (SSE) stream for real-time dynamic state push.
+- `GET /api/events`: Browser-facing SSE for ecosystem projection changes.
+
+The evidence returned by `/api/state` and `/api/raw` is always the pinned input
+attested by the immutable runtime witness. Live ecosystem changes are kept in a
+separate state channel and never rewrite that witness.
 
 ## Build and test
 

@@ -1,0 +1,19 @@
+name: synth-web
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Verify runtime
+        run: ctest --test-dir build --output-on-failure
+      - name: Package
+        run: cmake --build build --target package

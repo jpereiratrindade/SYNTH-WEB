@@ -335,6 +335,86 @@ h1 {
   gap: 10px;
 }
 
+.ecosystem-menu {
+  position: relative;
+}
+
+.ecosystem-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.ecosystem-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ecosystem-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--epistemic-derived);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ecosystem-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--border-prominent);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-elevated);
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+}
+
+.ecosystem-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.ecosystem-heading span {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+#ecosystem-providers {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  list-style: none;
+}
+
+#ecosystem-providers a {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+#ecosystem-providers a:hover,
+#ecosystem-providers a:focus-visible {
+  border-color: var(--border-focus);
+  background: var(--bg-subtle);
+}
+
+#ecosystem-providers code,
+.ecosystem-empty {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
