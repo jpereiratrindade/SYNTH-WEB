@@ -15,7 +15,7 @@
   },
   "basis": {
     "architectural_rule": "SYNTH fornece realidade; SYNTH-WEB fornece experiência.",
-    "boundary": "Nenhuma modificação no repositório SYNTH."
+    "boundary": "Integração somente por superfícies e descritores públicos versionados do SYNTH."
   }
 }
 ```
@@ -169,3 +169,49 @@ O layout do canvas SVG é gerado dinamicamente:
 5. **Evidência Indisponível**: Banner e estado claro com status `UNAVAILABLE` sem falhas silenciosas.
 6. **Evidência Inválida**: Validação rejeita formato corrompido ou epistemic_class não-OBSERVED.
 7. **Evidência Antiga (Stale)**: Ticker de tempo >120s reflete estado `aging/stale` derivado pela web.
+
+---
+
+## 6. Evidência pinada e ecossistema vivo
+
+O documento resolvido de `synth.evidence` permanece imutável durante toda a
+realização. `/api/state` e `/api/raw` expõem esse snapshot, e o witness que o
+atesta é escrito uma única vez antes da promoção.
+
+A visão atual do ecossistema chega separadamente pela capacidade pública
+`synth.ecosystem.stream.v1`, descrita em `SYNTH_ECOSYSTEM_STREAM`. O descritor
+versionado contém argv e ambiente suficientes para iniciar uma consulta local
+sem shell e sem acesso direto ao estado privado do SYNTH.
+
+```text
+synth.evidence                  -> snapshot auditável e pinado
+synth.ecosystem.stream.v1       -> projeções factuais presentes em NDJSON
+interface.human.web.v1          -> interface humana descoberta semanticamente
+```
+
+O backend mantém a projeção mais recente em memória, oferece
+`GET /api/ecosystem` e encaminha mudanças ao navegador por SSE. Uma falha do
+stream não invalida nem substitui a evidência pinada.
+
+## 7. Descoberta de interfaces humanas
+
+O SYNTH-WEB publica duas superfícies no mesmo endpoint:
+
+- `synth-web.http`, preservada por compatibilidade;
+- `interface.human.web.v1`, contrato compartilhado `http + text/html`.
+
+O menu **Ecossistema** mostra apenas provedores `ACTIVE + OBSERVED` dessa
+superfície. Os links são construídos com APIs DOM e abertos com
+`noopener noreferrer`; nenhum HTML vindo da projeção é interpolado.
+
+## 8. Critérios de aceitação
+
+```text
+PINNED_EVIDENCE_UNCHANGED       PASS
+IMMUTABLE_WITNESS               PASS
+LIVE_ECOSYSTEM_SEPARATE         PASS
+SEMANTIC_HUMAN_SURFACE          PASS
+ECOSYSTEM_HTTP_ADAPTER          PASS
+CTEST                           PASS
+CI                              PENDING
+```

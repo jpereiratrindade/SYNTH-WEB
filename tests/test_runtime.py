@@ -23,11 +23,64 @@ def wait_for(path: pathlib.Path, timeout: float = 5.0) -> None:
     raise AssertionError(f"timed out waiting for {path}")
 
 
+def wait_for_json(url: str, predicate, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                value = json.load(response)
+            if predicate(value):
+                return value
+        except Exception:
+            pass
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for JSON condition at {url}")
+
+
 def test_baseline_and_dynamic_runtime(distribution: pathlib.Path) -> None:
     with tempfile.TemporaryDirectory() as temporary:
         root = pathlib.Path(temporary)
         
-        # Initial fixture: 1 surface, 0 relations
+        ecosystem_initial = {
+            "$schema": "urn:synth:schema:ecosystem-projection:0.1.0",
+            "schema_version": "0.1.0",
+            "generation": "a" * 64,
+            "observed_at": "2026-09-13T00:00:00Z",
+            "epistemic_class": "OBSERVED",
+            "participants": [{
+                "identity": "SYNTH",
+                "version": "0.1.0",
+                "description": "SYNTH factual core",
+                "state": "ACTIVE",
+                "epistemic_class": "OBSERVED",
+                "registration_evidence_ref": "/observed/foundation.md",
+                "realization_id": None,
+                "realization_evidence_ref": "/observed/evidence.json",
+                "declared_surfaces": [],
+                "observed_surfaces": [],
+            }],
+            "surfaces": [],
+            "relations": [],
+        }
+        ecosystem_updated = {
+            **ecosystem_initial,
+            "generation": "b" * 64,
+            "observed_at": "2026-09-13T01:00:00Z",
+            "surfaces": [{
+                "id": "interface.human.web.v1",
+                "providers": [{
+                    "identity": "context-lab",
+                    "state": "ACTIVE",
+                    "epistemic_class": "OBSERVED",
+                    "kind": "http",
+                    "media_type": "text/html",
+                    "locator": "http://127.0.0.1:9000",
+                    "evidence_ref": "/observed/context-lab-witness.json",
+                }],
+            }],
+        }
+
+        # Initial immutable evidence fixture: 1 surface, 0 relations.
         evidence = {
             "identity": "SYNTH",
             "version": "0.1.0",
@@ -37,6 +90,7 @@ def test_baseline_and_dynamic_runtime(distribution: pathlib.Path) -> None:
                 {"id": "synth.evidence", "owner": "SYNTH", "kind": "file", "locator": str(root / "evidence.json"), "direction": "outbound", "media_type": "application/json", "observability": "public-surface"}
             ],
             "observed_relations": [],
+            "ecosystem": ecosystem_initial,
         }
         evidence_path = root / "evidence.json"
         evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
@@ -48,19 +102,50 @@ def test_baseline_and_dynamic_runtime(distribution: pathlib.Path) -> None:
         }), encoding="utf-8")
         
         witness_path = root / "witness.json"
+        stream_state = root / "ecosystem.json"
+        stream_state.write_text(json.dumps(ecosystem_initial), encoding="utf-8")
+        stream_program = root / "ecosystem-stream.py"
+        stream_program.write_text(
+            """import json, os, pathlib, time
+path = pathlib.Path(os.environ[\"ECOSYSTEM_TEST_STATE\"])
+generation = None
+while True:
+    try:
+        value = json.loads(path.read_text(encoding=\"utf-8\"))
+        if value.get(\"generation\") != generation:
+            print(json.dumps(value), flush=True)
+            generation = value.get(\"generation\")
+    except Exception:
+        pass
+    time.sleep(0.05)
+""",
+            encoding="utf-8",
+        )
         environment = {
             "PATH": "/usr/bin:/bin",
             "SYNTH_REALIZATION_ID": "test-realization",
             "SYNTH_WITNESS_PATH": str(witness_path),
             "SYNTH_RESOLVED_SURFACES_PATH": str(resolved_path),
+            "SYNTH_ECOSYSTEM_STREAM": json.dumps({
+                "$schema": "urn:synth:capability:ecosystem-stream:0.1.0",
+                "surface": "synth.ecosystem.stream.v1",
+                "media_type": "application/x-ndjson",
+                "argv": [sys.executable, str(stream_program)],
+                "environment": {"ECOSYSTEM_TEST_STATE": str(stream_state)},
+            }),
         }
         
         process = subprocess.Popen([distribution / "bin" / "synth-web"], env=environment)
         try:
             wait_for(witness_path)
             witness = json.loads(witness_path.read_text(encoding="utf-8"))
+            witness_bytes = witness_path.read_bytes()
+            evidence_bytes = evidence_path.read_bytes()
             assert witness["identity"] == "synth-web"
             assert witness["consumed_surfaces"][0]["evidence_sha256"] == hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            assert {item["id"] for item in witness["provided_surfaces"]} == {
+                "synth-web.http", "interface.human.web.v1"
+            }
             endpoint = witness["provided_surfaces"][0]["locator"]
 
             # Test Static UI served
@@ -69,6 +154,8 @@ def test_baseline_and_dynamic_runtime(distribution: pathlib.Path) -> None:
                 assert b"Observed surfaces" in body
                 assert b"Relational Field" in body
                 assert b"relational-field" in body
+                assert b"Ecosystem" in body
+                assert b"ecosystem-providers" in body
 
             # Test API State
             with urllib.request.urlopen(endpoint + "/api/state", timeout=1) as response:
@@ -84,39 +171,31 @@ def test_baseline_and_dynamic_runtime(distribution: pathlib.Path) -> None:
                 assert meta["is_live"] is True
                 assert meta["source_digest"] == witness["consumed_surfaces"][0]["evidence_sha256"]
 
+            current_ecosystem = wait_for_json(
+                endpoint + "/api/ecosystem",
+                lambda value: value.get("generation") == ecosystem_initial["generation"],
+            )
+            assert current_ecosystem["surfaces"] == []
+
             # Test Readiness Script
             readiness = subprocess.run([distribution / "bin" / "readiness"], env=environment, check=False)
             assert readiness.returncode == 0
 
-            # Dynamic Update Test: Modify evidence on disk (add 2 surfaces and 1 relation)
-            updated_evidence = {
-                "identity": "SYNTH",
-                "version": "0.1.1",
-                "epistemic_class": "OBSERVED",
-                "timestamp": "2026-09-13T01:00:00Z",
-                "observed_surfaces": [
-                    {"id": "synth.evidence", "owner": "SYNTH", "kind": "file", "locator": str(evidence_path), "direction": "outbound", "media_type": "application/json", "observability": "public-surface"},
-                    {"id": "synth.control", "owner": "SYNTH", "kind": "socket", "locator": "ipc:///tmp/synth.sock", "direction": "inbound", "media_type": "application/octet-stream", "observability": "observed-endpoint"},
-                    {"id": "synth.metrics", "owner": "SYNTH", "kind": "metrics", "locator": "http://127.0.0.1:9090/metrics", "direction": "outbound", "media_type": "text/plain", "observability": "observed-endpoint"},
-                ],
-                "observed_relations": [
-                    {"source": "SYNTH", "target": "synth-web", "surface": "synth.evidence", "epistemic_class": "OBSERVED", "observed_at": "2026-09-13T01:00:00Z"}
-                ],
-            }
-            evidence_path.write_text(json.dumps(updated_evidence), encoding="utf-8")
-            
-            # Wait for watcher thread in synth-web to detect digest change and update witness
-            time.sleep(0.5)
-            
-            updated_witness = json.loads(witness_path.read_text(encoding="utf-8"))
-            new_sha = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
-            assert updated_witness["consumed_surfaces"][0]["evidence_sha256"] == new_sha
-            
+            # A separate live stream changes while evidence and witness remain pinned.
+            stream_state.write_text(json.dumps(ecosystem_updated), encoding="utf-8")
+            live_ecosystem = wait_for_json(
+                endpoint + "/api/ecosystem",
+                lambda value: value.get("generation") == ecosystem_updated["generation"],
+            )
+            assert live_ecosystem["surfaces"][0]["providers"][0]["identity"] == "context-lab"
+            assert evidence_path.read_bytes() == evidence_bytes
+            assert witness_path.read_bytes() == witness_bytes
+
             with urllib.request.urlopen(endpoint + "/api/state", timeout=1) as response:
-                new_state = json.load(response)
-                assert new_state["version"] == "0.1.1"
-                assert len(new_state["observed_surfaces"]) == 3
-                assert len(new_state["observed_relations"]) == 1
+                pinned_state = json.load(response)
+                assert pinned_state["version"] == "0.1.0"
+                assert len(pinned_state["observed_surfaces"]) == 1
+                assert len(pinned_state["observed_relations"]) == 0
 
         finally:
             process.terminate()

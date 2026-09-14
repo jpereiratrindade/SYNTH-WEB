@@ -10,9 +10,9 @@ import os
 import pathlib
 import queue
 import signal
+import subprocess
 import tempfile
 import threading
-import time
 import urllib.request
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -41,7 +41,7 @@ def atomic_json(path: pathlib.Path, value: dict) -> None:
         raise
 
 
-def load_resolved_surface() -> tuple[dict, dict, bytes, pathlib.Path]:
+def load_resolved_surface() -> tuple[dict, dict, bytes]:
     resolution_path = pathlib.Path(os.environ["SYNTH_RESOLVED_SURFACES_PATH"])
     resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
     if resolution.get("epistemic_class") != "RESOLVED":
@@ -52,23 +52,57 @@ def load_resolved_surface() -> tuple[dict, dict, bytes, pathlib.Path]:
     evidence = json.loads(evidence_bytes)
     if evidence.get("identity") != "SYNTH" or evidence.get("epistemic_class") != "OBSERVED":
         raise RuntimeError("synth.evidence is not a factual SYNTH observation")
-    return surface, evidence, evidence_bytes, evidence_path
+    return surface, evidence, evidence_bytes
+
+
+def load_ecosystem_stream() -> tuple[list[str], dict[str, str]] | None:
+    encoded = os.environ.get("SYNTH_ECOSYSTEM_STREAM")
+    if not encoded:
+        return None
+    descriptor = json.loads(encoded)
+    if (
+        descriptor.get("$schema") != "urn:synth:capability:ecosystem-stream:0.1.0"
+        or descriptor.get("surface") != "synth.ecosystem.stream.v1"
+        or descriptor.get("media_type") != "application/x-ndjson"
+    ):
+        raise RuntimeError("unsupported SYNTH ecosystem stream descriptor")
+    argv = descriptor.get("argv")
+    environment = descriptor.get("environment")
+    if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
+        raise RuntimeError("invalid SYNTH ecosystem stream argv")
+    if not isinstance(environment, dict) or not all(
+        isinstance(key, str) and key and isinstance(value, str) and value
+        for key, value in environment.items()
+    ):
+        raise RuntimeError("invalid SYNTH ecosystem stream environment")
+    child_environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        **environment,
+    }
+    return argv, child_environment
 
 
 class StateManager:
-    def __init__(self, surface: dict, evidence: dict, evidence_bytes: bytes, evidence_path: pathlib.Path, endpoint: str | None = None, healthy: bool = True):
+    def __init__(self, surface: dict, evidence: dict, evidence_bytes: bytes, endpoint: str | None = None, healthy: bool = True):
         self.surface = surface
         self.evidence = evidence
         self.evidence_bytes = evidence_bytes
-        self.evidence_path = evidence_path
         self.evidence_sha256 = hashlib.sha256(evidence_bytes).hexdigest()
         self.loaded_at = now()
         self.endpoint = endpoint
         self.healthy = healthy
+        embedded = evidence.get("ecosystem")
+        self.ecosystem = embedded if isinstance(embedded, dict) else None
+        self.ecosystem_generation = self.ecosystem.get("generation") if self.ecosystem else None
+        self.stream_connected = False
+        self.stream_error: str | None = None
         self.lock = threading.Lock()
         self.subscribers: list[queue.Queue[str]] = []
         self._stopping = threading.Event()
         self._watcher_thread: threading.Thread | None = None
+        self._stream_process: subprocess.Popen[str] | None = None
 
     def start_watcher(self) -> None:
         self._watcher_thread = threading.Thread(target=self._watch_loop, daemon=True)
@@ -76,8 +110,14 @@ class StateManager:
 
     def stop_watcher(self) -> None:
         self._stopping.set()
+        process = self._stream_process
+        if process and process.poll() is None:
+            process.terminate()
         if self._watcher_thread:
             self._watcher_thread.join(timeout=1.0)
+        if process and process.poll() is None:
+            process.kill()
+            process.wait(timeout=1.0)
 
     def subscribe(self) -> queue.Queue[str]:
         q: queue.Queue[str] = queue.Queue(maxsize=100)
@@ -99,7 +139,7 @@ class StateManager:
                 except queue.Full:
                     pass
 
-    def _update_witness(self) -> None:
+    def write_witness(self) -> None:
         witness_path_str = os.environ.get("SYNTH_WITNESS_PATH")
         realization_id = os.environ.get("SYNTH_REALIZATION_ID")
         if not witness_path_str or not realization_id or not self.endpoint:
@@ -112,16 +152,28 @@ class StateManager:
             "version": VERSION,
             "realization_id": realization_id,
             "process": {"pid": os.getpid()},
-            "provided_surfaces": [{
-                "id": "synth-web.http",
-                "owner": IDENTITY,
-                "kind": "http",
-                "locator": self.endpoint,
-                "direction": "inbound",
-                "media_type": "text/html",
-                "observability": "runtime-witness",
-                "metadata": "factual human projection of resolved SYNTH evidence",
-            }],
+            "provided_surfaces": [
+                {
+                    "id": "synth-web.http",
+                    "owner": IDENTITY,
+                    "kind": "http",
+                    "locator": self.endpoint,
+                    "direction": "inbound",
+                    "media_type": "text/html",
+                    "observability": "runtime-witness",
+                    "metadata": "factual human projection of resolved SYNTH evidence",
+                },
+                {
+                    "id": "interface.human.web.v1",
+                    "owner": IDENTITY,
+                    "kind": "http",
+                    "locator": self.endpoint,
+                    "direction": "inbound",
+                    "media_type": "text/html",
+                    "observability": "runtime-witness",
+                    "metadata": "versioned human interface with live ecosystem discovery",
+                },
+            ],
             "consumed_surfaces": [{
                 "id": self.surface["id"],
                 "locator": self.surface["locator"],
@@ -134,28 +186,57 @@ class StateManager:
         atomic_json(pathlib.Path(witness_path_str), witness)
 
     def _watch_loop(self) -> None:
+        try:
+            stream = load_ecosystem_stream()
+        except Exception as error:
+            with self.lock:
+                self.stream_error = str(error)
+            return
+        if stream is None:
+            return
+        argv, environment = stream
         while not self._stopping.is_set():
-            time.sleep(0.2)
             try:
-                if not self.evidence_path.is_file():
-                    continue
-                new_bytes = self.evidence_path.read_bytes()
-                new_sha256 = hashlib.sha256(new_bytes).hexdigest()
-                if new_sha256 == self.evidence_sha256:
-                    continue
-                new_evidence = json.loads(new_bytes)
-                if new_evidence.get("identity") != "SYNTH" or new_evidence.get("epistemic_class") != "OBSERVED":
-                    continue
                 with self.lock:
-                    self.evidence_bytes = new_bytes
-                    self.evidence_sha256 = new_sha256
-                    self.evidence = new_evidence
-                    self.loaded_at = now()
-                if self.healthy:
-                    self._update_witness()
-                self._broadcast("state_updated", json.dumps(self.evidence))
-            except Exception:
-                pass
+                    self.stream_error = None
+                process = subprocess.Popen(
+                    argv,
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    bufsize=1,
+                )
+                self._stream_process = process
+                with self.lock:
+                    self.stream_connected = True
+                assert process.stdout is not None
+                for line in process.stdout:
+                    if self._stopping.is_set():
+                        break
+                    projection = json.loads(line)
+                    if (
+                        projection.get("$schema") != "urn:synth:schema:ecosystem-projection:0.1.0"
+                        or projection.get("epistemic_class") != "OBSERVED"
+                        or not isinstance(projection.get("generation"), str)
+                    ):
+                        continue
+                    with self.lock:
+                        if projection["generation"] == self.ecosystem_generation:
+                            continue
+                        self.ecosystem = projection
+                        self.ecosystem_generation = projection["generation"]
+                    self._broadcast("ecosystem_updated", json.dumps(projection))
+                process.wait()
+            except Exception as error:
+                with self.lock:
+                    self.stream_error = str(error)
+            finally:
+                with self.lock:
+                    self.stream_connected = False
+                self._stream_process = None
+            self._stopping.wait(0.5)
 
 
 STATE_MANAGER: StateManager | None = None
@@ -195,6 +276,18 @@ class FactualHandler(BaseHTTPRequestHandler):
             self.send_bytes(HTTPStatus.OK, "application/json", json.dumps(data).encode())
             return
 
+        if self.path == "/api/ecosystem":
+            if not mgr:
+                self.send_bytes(HTTPStatus.SERVICE_UNAVAILABLE, "application/json", b"{}")
+                return
+            with mgr.lock:
+                ecosystem = mgr.ecosystem
+            if ecosystem is None:
+                self.send_bytes(HTTPStatus.SERVICE_UNAVAILABLE, "application/json", b"{}")
+                return
+            self.send_bytes(HTTPStatus.OK, "application/json", json.dumps(ecosystem).encode())
+            return
+
         if self.path == "/api/meta":
             if not mgr:
                 self.send_bytes(HTTPStatus.SERVICE_UNAVAILABLE, "application/json", b"{}")
@@ -208,7 +301,9 @@ class FactualHandler(BaseHTTPRequestHandler):
                     "source_locator": mgr.surface["locator"],
                     "source_digest": mgr.evidence_sha256,
                     "loaded_at": mgr.loaded_at,
-                    "is_live": True,
+                    "is_live": mgr.stream_connected,
+                    "ecosystem_generation": mgr.ecosystem_generation,
+                    "stream_error": mgr.stream_error,
                 }
             self.send_bytes(HTTPStatus.OK, "application/json", json.dumps(meta).encode())
             return
@@ -221,7 +316,6 @@ class FactualHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Connection", "keep-alive")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             
             sub_queue = mgr.subscribe()
@@ -229,7 +323,10 @@ class FactualHandler(BaseHTTPRequestHandler):
                 # Send initial connection event with current state
                 with mgr.lock:
                     initial_state = json.dumps(mgr.evidence)
+                    initial_ecosystem = json.dumps(mgr.ecosystem) if mgr.ecosystem else None
                 self.wfile.write(f"event: ready\ndata: {initial_state}\n\n".encode("utf-8"))
+                if initial_ecosystem:
+                    self.wfile.write(f"event: ecosystem_ready\ndata: {initial_ecosystem}\n\n".encode("utf-8"))
                 self.wfile.flush()
 
                 while True:
@@ -274,7 +371,7 @@ def main() -> int:
     parser.add_argument("--fail-readiness", action="store_true")
     options = parser.parse_args()
 
-    surface, evidence, evidence_bytes, evidence_path = load_resolved_surface()
+    surface, evidence, evidence_bytes = load_resolved_surface()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FactualHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -284,7 +381,6 @@ def main() -> int:
         surface=surface,
         evidence=evidence,
         evidence_bytes=evidence_bytes,
-        evidence_path=evidence_path,
         endpoint=endpoint,
         healthy=not options.fail_readiness,
     )
@@ -298,7 +394,7 @@ def main() -> int:
         with urllib.request.urlopen(endpoint + "/health", timeout=1) as response:
             if response.status != HTTPStatus.OK:
                 raise RuntimeError("self-observed readiness failed")
-        STATE_MANAGER._update_witness()
+        STATE_MANAGER.write_witness()
 
     stopping.wait()
     STATE_MANAGER.stop_watcher()
