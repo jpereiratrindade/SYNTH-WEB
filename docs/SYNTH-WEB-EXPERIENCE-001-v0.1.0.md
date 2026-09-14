@@ -1,12 +1,12 @@
 # SYNTH-WEB-EXPERIENCE-001 — Especificação de Design e Arquitetura de Experiência
-## v0.1.0 — design-candidate
+## v0.1.0 — implemented
 
 ```context-metadata+json
 {
   "document": {
     "id": "SYNTH-WEB-EXPERIENCE-001-SPEC",
     "version": "0.1.0",
-    "status": "design-candidate",
+    "status": "implemented",
     "title": "Especificação de Design e Experiência do SYNTH-WEB",
     "project": "SYNTH-WEB",
     "created_at": "2026-09-13",
@@ -213,5 +213,9 @@ LIVE_ECOSYSTEM_SEPARATE         PASS
 SEMANTIC_HUMAN_SURFACE          PASS
 ECOSYSTEM_HTTP_ADAPTER          PASS
 CTEST                           PASS
-CI                              PENDING
+CI                              PASS
 ```
+
+O status `implemented` foi confirmado no commit funcional `e6932e2` pelas CIs
+[34797430675](https://github.com/jpereiratrindade/SYNTH-WEB/actions/runs/34797430675)
+e [34797434999](https://github.com/jpereiratrindade/SYNTH-WEB/actions/runs/34797434999).
