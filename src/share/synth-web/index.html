@@ -1,41 +1,167 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SYNTH — observed state</title>
+    <title>SYNTH — Observed State</title>
+    <meta name="description" content="Independent factual web projection of resolved SYNTH evidence.">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">FACTUAL PROJECTION · LIVE EVIDENCE</p>
-        <h1>SYNTH</h1>
-        <p id="summary">Reading the resolved public evidence surface…</p>
+    <div class="app-layout">
+      <!-- Top Bar / Navigation -->
+      <header class="top-bar" role="banner">
+        <div class="brand-group">
+          <div class="brand-core">
+            <span class="system-glyph" aria-hidden="true">⬡</span>
+            <h1 id="brand-identity">SYNTH</h1>
+            <span id="version-tag" class="badge badge-subtle" title="Observed SYNTH version">—</span>
+          </div>
+          <div class="projection-status-pill" id="projection-pill" aria-live="polite">
+            <span class="status-indicator" id="status-dot"></span>
+            <span id="projection-label">Connecting…</span>
+          </div>
+        </div>
+
+        <div class="header-metrics" id="header-metrics" aria-label="System Metrics Summary">
+          <div class="metric-item" title="Age of current evidence">
+            <span class="metric-label">Age</span>
+            <span class="metric-value" id="evidence-age">—</span>
+            <span class="metric-badge" id="freshness-badge">OBSERVING</span>
+          </div>
+          <div class="metric-divider" aria-hidden="true"></div>
+          <div class="metric-item">
+            <span class="metric-label">Surfaces</span>
+            <span class="metric-value font-mono" id="metric-surfaces">0</span>
+          </div>
+          <div class="metric-divider" aria-hidden="true"></div>
+          <div class="metric-item">
+            <span class="metric-label">Relations</span>
+            <span class="metric-value font-mono" id="metric-relations">0</span>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <button id="theme-toggle" class="btn btn-ghost btn-icon" aria-label="Toggle theme: system, dark, or light" title="Theme selector">
+            <span id="theme-icon" aria-hidden="true">◐</span>
+          </button>
+          <button id="btn-open-raw" class="btn btn-secondary" aria-haspopup="dialog" aria-controls="raw-modal">
+            <span aria-hidden="true">{ }</span> Raw Evidence
+          </button>
+        </div>
       </header>
-      <section class="signal" aria-live="polite">
-        <span class="pulse"></span><strong id="evidence-state">OBSERVING</strong>
-        <span id="observed-at"></span>
-      </section>
-      <section class="grid">
-        <article><p>Identity</p><strong id="identity">—</strong></article>
-        <article><p>Version</p><strong id="version">—</strong></article>
-        <article><p>Surfaces</p><strong id="surface-count">—</strong></article>
-        <article><p>Relations</p><strong id="relation-count">—</strong></article>
-      </section>
-      <section>
-        <div class="section-title"><h2>Observed surfaces</h2><span>PUBLIC</span></div>
-        <div id="surfaces" class="stack"></div>
-      </section>
-      <section>
-        <div class="section-title"><h2>Observed relations</h2><span>WITNESSED</span></div>
-        <div id="relations" class="stack"></div>
-      </section>
-      <details>
-        <summary>Inspect raw evidence</summary>
-        <pre id="raw"></pre>
-      </details>
-    </main>
-    <script src="/app.js" defer></script>
+
+      <!-- Main Stage: Relational Field (NOW Layer) -->
+      <main class="main-content" role="main">
+        <div class="canvas-wrapper" id="canvas-wrapper">
+          <div class="canvas-overlay-top">
+            <div class="epistemic-flag">
+              <span class="badge badge-epistemic" id="epistemic-badge">OBSERVED</span>
+              <span class="epistemic-desc" id="source-desc">Resolved public surface: <code class="font-mono" id="source-name">synth.evidence</code></span>
+            </div>
+          </div>
+
+          <!-- Dynamic SVG Relational Field -->
+          <svg id="relational-field" class="relational-svg" role="img" aria-labelledby="field-title field-desc" viewBox="0 0 1000 650" preserveAspectRatio="xMidYMid meet">
+            <title id="field-title">SYNTH Relational Field</title>
+            <desc id="field-desc">Spatial topological visualization of observed SYNTH system, surfaces, and witnessed relations.</desc>
+            <defs>
+              <filter id="glow-core" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="8" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+              <filter id="glow-node" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+              <marker id="arrow-observed" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" class="marker-path" />
+              </marker>
+            </defs>
+            <g id="svg-background-grid"></g>
+            <g id="svg-relations"></g>
+            <g id="svg-orbit-tracks"></g>
+            <g id="svg-nodes"></g>
+          </svg>
+
+          <!-- Factual Zero-State Indicator -->
+          <div id="field-empty-notice" class="field-notice" aria-live="polite" hidden>
+            <span class="notice-icon">ℹ</span>
+            <span id="field-notice-text">No relations observed in this snapshot.</span>
+          </div>
+
+          <!-- Canvas Overlay Bottom Controls & Keyboard Hints -->
+          <div class="canvas-overlay-bottom">
+            <div class="keyboard-hints" aria-hidden="true">
+              <kbd>Tab</kbd> Navigate nodes &bull; <kbd>Enter</kbd> Inspect &bull; <kbd>Esc</kbd> Close panel
+            </div>
+            <div class="provenance-tag">
+              <span id="provenance-time">Observing public surface…</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accessible Text Alternative (for Screen Readers & Audit) -->
+        <section class="sr-only" aria-label="Observed System Topology (Text Alternative)">
+          <h2>Observed surfaces</h2>
+          <ul id="sr-surfaces-list"></ul>
+          <h2>Observed relations</h2>
+          <ul id="sr-relations-list"></ul>
+        </section>
+      </main>
+
+      <!-- Contextual Inspector Drawer (INSPECT Layer) -->
+      <aside id="inspector-drawer" class="inspector-drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" aria-hidden="true">
+        <div class="drawer-header">
+          <div class="drawer-title-group">
+            <span class="badge badge-outline" id="drawer-entity-type">SURFACE</span>
+            <h2 id="drawer-title">Entity Inspection</h2>
+          </div>
+          <button id="btn-close-drawer" class="btn btn-ghost btn-icon" aria-label="Close inspection panel">✕</button>
+        </div>
+
+        <div class="drawer-body" id="drawer-body">
+          <div class="epistemic-notice" id="drawer-epistemic-notice">
+            <span class="badge badge-epistemic" id="drawer-epistemic-tag">OBSERVED</span>
+            <span id="drawer-epistemic-text">Data derived directly from resolved SYNTH evidence.</span>
+          </div>
+
+          <dl class="property-list" id="drawer-properties">
+            <!-- Populated dynamically -->
+          </dl>
+
+          <div class="drawer-actions">
+            <button id="btn-drawer-inspect-raw" class="btn btn-secondary btn-block">
+              Inspect Raw JSON for this Entity
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Raw Evidence Modal (EVIDENCE Layer) -->
+      <div id="raw-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="raw-modal-title" aria-hidden="true" hidden>
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <div class="modal-title-group">
+              <span class="badge badge-epistemic">AUDITABLE EVIDENCE</span>
+              <h2 id="raw-modal-title">Raw Evidence Surface</h2>
+            </div>
+            <div class="modal-header-actions">
+              <button id="btn-copy-raw" class="btn btn-secondary btn-sm">Copy JSON</button>
+              <button id="btn-close-raw" class="btn btn-ghost btn-icon" aria-label="Close raw evidence modal">✕</button>
+            </div>
+          </div>
+          <div class="modal-body">
+            <div class="digest-bar">
+              <span class="digest-label">SHA-256 Digest:</span>
+              <code class="digest-value font-mono" id="raw-digest-val">computing…</code>
+            </div>
+            <pre class="raw-json-code"><code id="raw-json-content">Loading…</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js" type="module"></script>
   </body>
 </html>
