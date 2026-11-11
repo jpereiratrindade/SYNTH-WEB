@@ -51,3 +51,9 @@ dependencies are required. CMake 3.25+ (BSD-3-Clause) provides the build and pac
 workflow.
 
 License: GPL-3.0-only.
+
+## Premissas de desenvolvimento
+
+**Simples, leve. Sempre pronto. Sempre incompleto!**
+
+[Significado e símbolos das premissas](docs/sister-principles/README.md).
